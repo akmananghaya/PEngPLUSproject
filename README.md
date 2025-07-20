@@ -3,9 +3,9 @@ This repository contains the codes used for the course Privacy Engineering (2025
 
 ## List of Codes
 ### Anonymization
-[Own Implementation]()
-[Mondrian]()
+- [Own Implementation](Anon_CustomMethod.Rmd)
+- [Mondrian](Anon_Mondrian.ipynb)
 
 ### Recommender Systems
-[Bayesian Personalized Ranking (BPR)]()
-[Smart Adaptive Recommendations (SAR)]()
+- [Bayesian Personalized Ranking (BPR)](RecSys_BPR.ipynb)
+- [Smart Adaptive Recommendations (SAR)](RecSys_SAR.ipynb)

@@ -1,0 +1,246 @@
+---
+title: "Implementation"
+author: "AKMananghaya"
+date: "2025-05-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(cluster)
+library(proxy)
+library(Matrix)
+deezer_data <- read.csv("P:/pCloud Offline/PLUS/2nd Sem/Privacy Engineering/Data/DEEZER_BR.inter", header = TRUE, sep = ",")
+```
+
+## Loading the Dataset
+
+Loading the dataset and removing duplicates
+
+```{r}
+deezer_data <- read.csv("P:/pCloud Offline/PLUS/2nd Sem/Privacy Engineering/Data/DEEZER_BR.inter", header = TRUE, sep = ",")
+head(deezer_data)
+
+data_clean <- deezer_data %>%
+  select(user_id = user_id.token, item_id = item_id.token) %>%
+  mutate(
+    user_id = as.numeric(user_id),  # convert to numeric
+    item_id = as.character(item_id) 
+  ) 
+
+data_unique <- data_clean %>% distinct(user_id, item_id, .keep_all = TRUE)
+```
+
+## Converting to Sparse Matrix
+
+```{r}
+sparse_matrix <- sparseMatrix(
+  i = as.numeric(factor(data_unique$user_id)),
+  j = as.numeric(factor(data_unique$item_id)),
+  x = 1,
+  dimnames = list(levels(factor(data_unique$user_id)),
+                  levels(factor(data_unique$item_id)))
+)
+
+```
+
+## Filtering (Item-User)
+
+Filtering columns (items) first then rows (users). Note that this is sequential filtering.
+
+```{r}
+item_filter <- colSums(sparse_matrix) <100 # change the threshold
+filtered_matrix <- sparse_matrix[,!item_filter]
+
+user_filter <- rowSums(filtered_matrix) < 100 # change the threshold
+filtered_matrix <- filtered_matrix[!user_filter,]
+
+filtered_matrix <- as.matrix(filtered_matrix )
+str(filtered_matrix)
+```
+
+## Function: Jaccard Distance
+
+Function that would compute the Jaccard distance for all rows of a matrix
+
+```{r}
+compute_jaccard <- function(mat) {
+  jaccard_dist <- proxy::dist(mat, method = "Jaccard")
+  as.matrix(jaccard_dist)
+}
+
+```
+
+# Function: Bisecting c-Means
+
+Function that would implement the Bisecting c-means. The term c-means is used instead of k-means to avoid confusion with k-anonymization.
+
+```{r}
+bisecting_cmeans <- function(dist_matrix, m, min_cluster_size) {
+  set.seed(123)
+  # dist_matrix: distance matrix (jaccard)
+  # m: desired number of clusters
+  # min_cluster_size: minimum allowable size of a cluster (k)
+  step <- 1 # checker
+  
+  clusters <- list(1:nrow(dist_matrix))
+  while(length(clusters) < m) { # loop until m clusters are made
+    #cat("/n--- Step", step, "---/n")
+    #cat("Current number of clusters:", length(clusters), "/n")
+    sizes <- sapply(clusters, length) # identify which cluster to split
+    
+    #cat("Cluster sizes:", sizes, "/n")
+    
+    idx <- which.max(sizes)
+    cluster_to_split <- clusters[[idx]]
+    
+    #cat("Splitting cluster", idx, "of size", length(cluster_to_split), "/n")
+    
+    if(length(cluster_to_split) < 2 * min_cluster_size){
+      cat("Cluster too small to split. Stopping./n")
+      break # stop the loop if cluster is too small to split
+    }
+    
+    success <- FALSE
+    attempt <- 1
+    max_attempts <- 20
+    
+    # this loop will ensure that cluster size is at least the minimum
+    
+    while(!success && attempt <= max_attempts) { 
+      sub_dist <- dist_matrix[cluster_to_split, cluster_to_split] # extract distances from dist_matrix
+      mds <- cmdscale(as.dist(sub_dist), k=2) # classical multidimensional scaling (MDS)
+
+      km <- kmeans(mds, centers=2, nstart=2) # apply c-means to the 2D MDS-transformed data
+
+      
+      split1 <- cluster_to_split[km$cluster == 1] 
+      split2 <- cluster_to_split[km$cluster == 2] 
+      
+      #cat("Attempt", attempt, "split sizes:", length(split1), length(split2), "/n") 
+      
+      if(length(split1) >= min_cluster_size && length(split2) >= min_cluster_size) {
+        
+        # cat("Split result: Sizes =", table(km$cluster), "/n")
+      
+        clusters[[idx]] <- split1 # replace original cluster with the first c-means group
+        clusters <- append(clusters, list(split2)) # add second group as a cluster
+        
+        success <- TRUE
+        step <- step + 1
+      } else {
+        attempt <- attempt+1
+      }
+    }
+    
+    if(!success) {
+      # cat("Could not find a valid split after", max_attempts, "attempts. Skipping cluster./n")
+      break
+    }
+  }
+  
+  # assign cluster labels
+  for (i in seq_along(clusters)) {
+    final_labels[clusters[[i]]] <- i
+  }
+  
+  return(clusters)
+}
+
+```
+
+
+## Function: Flipping Values
+
+This does the flipping of 1s and 0s based on the majority
+```{r}
+anonymize_clusters <- function(matrix, clusters) {
+  # matrix: user-item matrix
+  # clusters: list of integer vectors from bisecting means
+
+  anonymized_mat <- matrix
+  
+  for(cluster in clusters) {
+    # get cluster submatrix
+    cluster_mat <- matrix[cluster,] # extract submatrix for current cluster
+    
+    item_counts <- colSums(cluster_mat)
+    
+    # for items with frequencies, flip to majority value
+    for(item in which(item_counts > 0)) {
+      majority_val <- as.numeric(mean(cluster_mat[,item]) >= 0.5)
+      anonymized_mat[cluster, item] <- majority_val
+    }
+  }
+  
+  anonymized_mat
+}
+
+
+```
+
+## Function: Hamming Distance Loss
+
+```{r}
+compute_loss <- function(original, anonymized) {
+  sum(abs(original - anonymized)) / length(original)
+}
+ 
+```
+
+
+## Implementing the Anonymization
+
+Start with preliminaries (Jaccard distance and Bisecting c-means)
+```{r}
+jaccard_dist <- compute_jaccard(filtered_matrix)
+```
+
+```{r}
+clusters_output <- bisecting_kmeans(jaccard_dist, m = 5000, 15) # change last parameter to k value
+```
+
+Check the sizes of the clusters formed.
+
+```{r}
+# frequency table of the sizes of the clusters
+lengths_vec <- sapply(clusters_output, length)
+freq_table <- table(lengths_vec)
+
+print(length(clusters_output))
+print(freq_table)
+```
+
+Implement the flipping based on the clusters formed.
+
+```{r}
+anonymized_matrix <- anonymize_clusters(filtered_matrix, clusters_output) 
+```
+
+Compute the Hamming distance loss.
+
+```{r}
+compute_loss(filtered_matrix,anonymized_matrix)
+```
+
+## Exporting the anonymized dataset
+
+This exported dataset will be used for the recommender systems.
+```{r}
+library(tibble)
+
+anonymized_mat <- anonymize_clusters(filtered_matrix, clusters_output)
+anonymized_mat <- as.data.frame(anonymized_mat)
+anonymized_mat <- rownames_to_column(anonymized_v1, var = "userID")
+
+# convert to long format 
+long_df <- anonymized_mat %>%
+  pivot_longer(cols = -userID, names_to = "itemID", values_to = "interaction") %>%
+  filter(interaction == 1) %>%
+  mutate(rating = 1, timestamp = 0) %>% # dummy variables needed for recsys
+  select(-interaction)
+
+write.csv(long_df, "P:/pCloud Offline/PLUS/2nd Sem/Privacy Engineering/Data/Results/own_k2_100_100.csv", row.names = FALSE)
+```

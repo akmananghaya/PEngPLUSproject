@@ -1,6 +1,6 @@
 ---
-title: "Implementation"
-author: "AKMananghaya"
+title: "Own Implementation"
+author: "Mananghaya and Pamunuwa"
 date: "2025-05-27"
 output: html_document
 ---
@@ -141,10 +141,6 @@ bisecting_cmeans <- function(dist_matrix, m, min_cluster_size) {
     }
   }
   
-  # assign cluster labels
-  for (i in seq_along(clusters)) {
-    final_labels[clusters[[i]]] <- i
-  }
   
   return(clusters)
 }
@@ -199,7 +195,7 @@ jaccard_dist <- compute_jaccard(filtered_matrix)
 ```
 
 ```{r}
-clusters_output <- bisecting_kmeans(jaccard_dist, m = 5000, 15) # change last parameter to k value
+clusters_output <- bisecting_cmeans(jaccard_dist, m = 5000, 15) # change last parameter to k value
 ```
 
 Check the sizes of the clusters formed.
@@ -233,7 +229,7 @@ library(tibble)
 
 anonymized_mat <- anonymize_clusters(filtered_matrix, clusters_output)
 anonymized_mat <- as.data.frame(anonymized_mat)
-anonymized_mat <- rownames_to_column(anonymized_v1, var = "userID")
+anonymized_mat <- rownames_to_column(anonymized_mat, var = "userID")
 
 # convert to long format 
 long_df <- anonymized_mat %>%

@@ -3,7 +3,7 @@ This repository contains the codes used for the course Privacy Engineering (2025
 
 ## List of Codes
 ### Anonymization
-- [Own Implementation](Anon_CustomMethod.Rmd)
+- [Own Implementation](Anon_Custom Method.Rmd)
 - [Mondrian](Anon_Mondrian.ipynb)
 
 ### Recommender Systems
